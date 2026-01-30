@@ -1,0 +1,53 @@
+{
+  "name": "n8n-nodes-agentid",
+  "version": "0.1.6",
+  "description": "Custom multi-step OAuth2 credential for AgentID / blueprint flow.",
+  "keywords": [
+    "n8n",
+    "credential",
+    "oauth2",
+    "agentid"
+  ],
+  "license": "MIT",
+  "author": "Anton Staykov",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p .",
+    "lint": "eslint . --ext .ts",
+    "prepare": "npm run build",
+    "pack": "npm pack"
+  },
+  "dependencies": {
+    "n8n-workflow": "^1.42.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "eslint": "^8.57.0",
+    "typescript": "^5.4.5"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "n8n": {
+    "nodes": [
+      {
+        "type": "dist/nodes/AgentIdToken.node.js",
+        "displayName": "AgentID Token"
+      },
+      {
+        "type": "dist/nodes/AgentIdPing.node.js",
+        "displayName": "AgentID Ping"
+      }
+    ],
+    "credentials": [
+      {
+        "type": "dist/credentials/AgentIdOAuth2Api.credentials.js",
+        "displayName": "AgentID OAuth2 API"
+      }
+    ]
+  }
+}
