@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-agentid",
-  "version": "0.1.6",
+  "version": "0.1.8",
   "description": "Custom multi-step OAuth2 credential for AgentID / blueprint flow.",
   "keywords": [
     "n8n",

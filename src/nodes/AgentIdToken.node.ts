@@ -100,21 +100,72 @@ export class AgentIdToken implements INodeType {
 		const cacheStats = { hits: 0, misses: 0, timings: {} as Record<string, number> };
 
 		for (let i = 0; i < items.length; i++) {
+			const debugLog: string[] = [];
+			const log = (msg: string) => {
+				const ts = new Date().toISOString();
+				debugLog.push(`[${ts}] ${msg}`);
+				this.logger.info(`[AgentIdToken] ${msg}`);
+			};
+
+			log(`--- Starting item ${i} ---`);
 			const credentials = await this.getCredentials('agentIdOAuth2Api');
 			const tokenEndpoint = credentials.tokenEndpoint as string;
 			const userScope = (credentials.scope as string | undefined) || DEFAULT_SCOPE;
 
+			log(`Token endpoint: ${tokenEndpoint}`);
+			log(`Scope: ${userScope}`);
+			log(`Blueprint ID: ${(credentials.blueprintId as string).substring(0, 8)}...`);
+			log(`Agent ID: ${(credentials.agentId as string).substring(0, 8)}...`);
+			log(`Agent User: ${credentials.agentUser as string}`);
+
 			const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
 			const encodeBody = (form: Record<string, string>) => new URLSearchParams(form).toString();
 
-			const request = async (form: Record<string, string>) => {
+			// Redact sensitive values for debug output
+			const redactForm = (form: Record<string, string>): Record<string, string> => {
+				const redacted: Record<string, string> = {};
+				for (const [k, v] of Object.entries(form)) {
+					if (['client_secret', 'client_assertion', 'user_federated_identity_credential'].includes(k)) {
+						redacted[k] = v ? `${v.substring(0, 20)}...[${v.length} chars]` : '(empty)';
+					} else {
+						redacted[k] = v;
+					}
+				}
+				return redacted;
+			};
+
+			const request = async (stepName: string, form: Record<string, string>) => {
+				const body = encodeBody(form);
 				const options: IHttpRequestOptions = {
 					method: 'POST',
 					url: tokenEndpoint,
 					headers,
-					body: encodeBody(form),
+					body: body,
 				};
-				return this.helpers.httpRequest(options) as Promise<TokenResponse>;
+				log(`[${stepName}] POST ${tokenEndpoint}`);
+				log(`[${stepName}] Form params: ${JSON.stringify(redactForm(form))}`);
+				try {
+					const resp = await (this.helpers.httpRequest(options) as Promise<TokenResponse>);
+					log(`[${stepName}] SUCCESS - got access_token (${resp.access_token?.length || 0} chars), expires_in=${resp.expires_in ?? 'N/A'}`);
+					return resp;
+				} catch (err: unknown) {
+					const error = err as Record<string, unknown>;
+					const responseBody = (error.response as Record<string, unknown>)?.data
+						?? (error.response as Record<string, unknown>)?.body
+						?? error.message
+						?? 'unknown error';
+					const statusCode = (error.response as Record<string, unknown>)?.status
+						?? (error.response as Record<string, unknown>)?.statusCode
+						?? 'N/A';
+					log(`[${stepName}] FAILED - status=${statusCode}`);
+					log(`[${stepName}] Error response: ${typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody)}`);
+					log(`[${stepName}] Full error keys: ${Object.keys(error).join(', ')}`);
+					// Rethrow with enriched message
+					const enrichedMsg = `[${stepName}] HTTP ${statusCode}: ${typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody)}`;
+					const newError = new Error(enrichedMsg) as Error & { debugLog: string[] };
+					newError.debugLog = debugLog;
+					throw newError;
+				}
 			};
 
 			// Helper function to get or fetch tokens with expiration-based caching
@@ -128,17 +179,20 @@ export class AgentIdToken implements INodeType {
 				if (cachedToken) {
 					cacheStats.hits++;
 					cacheStats.timings[cachePrefix] = 0; // Cache hit = 0ms
+					log(`[${cachePrefix}] Cache HIT`);
 					return cachedToken;
 				}
 
 				// Fetch new token
+				log(`[${cachePrefix}] Cache MISS - fetching...`);
 				cacheStats.misses++;
 				const startTime = Date.now();
-				const response = await request(form);
+				const response = await request(cachePrefix, form);
 				const elapsed = Date.now() - startTime;
 				const expiresIn = response.expires_in || defaultExpiry;
 				
 				cacheStats.timings[cachePrefix] = elapsed;
+				log(`[${cachePrefix}] Cached with expiresIn=${expiresIn}s, fetch took ${elapsed}ms`);
 				
 				// Cache the token
 				tokenCache.set(cachePrefix, form, response.access_token, expiresIn);
@@ -177,15 +231,34 @@ export class AgentIdToken implements INodeType {
 				user_federated_identity_credential: agentidFic,
 				scope: userScope,
 			};
-			const userToken = await getOrFetchToken('userToken', userTokenForm);
+			let userToken: string;
+			try {
+				userToken = await getOrFetchToken('userToken', userTokenForm);
+			} catch (err: unknown) {
+				// On failure, return debug log as output so user can see what happened
+				const error = err as Error & { debugLog?: string[] };
+				returnData.push({
+					error: error.message,
+					debug_log: error.debugLog || debugLog,
+					cache_info: {
+						node_version: '0.1.8',
+						cache_hits: cacheStats.hits,
+						cache_misses: cacheStats.misses,
+						fetch_times_ms: cacheStats.timings,
+					},
+				});
+				throw error;
+			}
 
+			log(`--- Completed item ${i} successfully ---`);
 			returnData.push({
 				access_token: userToken,
 				blueprint_token: blueprintFic,
 				agent_token: agentidFic,
 				scope: userScope,
+				debug_log: debugLog,
 				cache_info: {
-					node_version: '0.1.6',
+					node_version: '0.1.8',
 					cache_hits: cacheStats.hits,
 					cache_misses: cacheStats.misses,
 					fetch_times_ms: cacheStats.timings,

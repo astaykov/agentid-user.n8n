@@ -25,7 +25,7 @@ export class AgentIdPing implements INodeType {
 				displayName: 'URL',
 				name: 'url',
 				type: 'string',
-				default: '',
+				default: 'https://graph.microsoft.com/v1.0/me',
 				required: true,
 				description: 'Endpoint to call with the retrieved token',
 			},
